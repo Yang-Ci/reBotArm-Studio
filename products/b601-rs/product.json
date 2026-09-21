@@ -28,12 +28,10 @@
     "safe_home",
     "set_zero",
     "gravity_compensation",
-    "web_mujoco",
-    "mcp"
+    "web_mujoco"
   ],
   "assets": {
     "robotModel": "assets/robot/b601-rs",
     "mujocoModel": "assets/mujoco/b601-rs/rs_grasp_scene.xml"
   }
 }
-

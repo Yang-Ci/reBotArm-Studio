@@ -1,0 +1,21 @@
+{
+  "name": "@rebotarm/studio-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "B601-RS local control console and MuJoCo WASM digital twin",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5173",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 5173",
+    "smoke": "node scripts/smoke-load.mjs",
+    "test:explode": "node scripts/test-explosion-layout.mjs && node scripts/test-explosion-timeline.mjs"
+  },
+  "dependencies": {
+    "@mujoco/mujoco": "^3.12.0",
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "vite": "^6.3.5"
+  }
+}

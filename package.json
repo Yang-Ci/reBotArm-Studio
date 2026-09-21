@@ -9,8 +9,13 @@
     "protocol/typescript"
   ],
   "scripts": {
-    "test:backend": "python3 -m unittest discover -s backend/tests -v",
-    "products": "PYTHONPATH=backend/src python3 -m rebotd products list"
+    "bootstrap": "./scripts/bootstrap.sh",
+    "dev": "./scripts/dev.sh",
+    "test": "./scripts/test.sh",
+    "test:backend": "env -u PYTHONPATH -u AMENT_PREFIX_PATH -u COLCON_PREFIX_PATH -u ROS_DISTRO -u ROS_VERSION PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 backend/.venv/bin/python -m pytest backend/tests -q",
+    "build:web": "npm --workspace @rebotarm/studio-web run build",
+    "products": "env -u PYTHONPATH -u AMENT_PREFIX_PATH -u COLCON_PREFIX_PATH -u ROS_DISTRO -u ROS_VERSION backend/.venv/bin/rebotd products list",
+    "doctor": "./scripts/doctor.sh"
   },
   "engines": {
     "node": ">=20"

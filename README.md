@@ -16,15 +16,16 @@ reBotArm Studio 是面向 reBotArm 多产品线的桌面控制与数字孪生应
 
 ## 当前状态
 
-这是新 App 仓库的初始架构骨架：
+RS 的第一阶段本地适配已经完成：控制核心和 RobStride SDK 已移入仓库，`rebotd`
+直接通过 SocketCAN 管理真机，不依赖 ROS 2；旧版真机控制页面已经接入新的 WebSocket
+协议；MuJoCo WASM 数字孪生也已迁入同一个前端。
 
 | 产品 | 状态 | 计划后端 |
 |---|---|---|
 | B601-RS | `supported` | RobStride + SocketCAN |
 | B601-DM | `planned` | Damiao + Serial CAN bridge |
 
-目前尚未复制旧仓库的控制代码和模型资源。下一阶段会先迁移 RS 无 ROS 控制核心，
-并建立与旧 ROS 版本的行为等价测试。
+B601-DM 保留产品入口，等硬件驱动和模型验证完成后再标记为可用。
 
 ## 目录
 
@@ -42,27 +43,53 @@ docs/                     架构与迁移文档
 tests/                    协议、真机和兼容性测试
 ```
 
-## 验证产品注册表
+## 本地运行（不连接真机）
 
-需要 Python 3.11：
-
-```bash
-python3.11 -m unittest discover -s backend/tests -v
-PYTHONPATH=backend/src python3.11 -m rebotd products list
-```
-
-也可以使用当前系统 Python 运行不依赖第三方库的注册表测试：
+需要 Python 3.10–3.12、Node.js 20+：
 
 ```bash
-python3 -m unittest discover -s backend/tests -v
-PYTHONPATH=backend/src python3 -m rebotd products list
+./scripts/bootstrap.sh
+./scripts/dev.sh
 ```
+
+浏览器打开：
+
+- 数字孪生：<http://127.0.0.1:5173>
+- RS 控制台：<http://127.0.0.1:5173/rs-console/index.html>
+
+默认使用 fake RS 驱动，可以完整测试连接、使能、关节、轨迹、夹爪、IK、示教和重力补偿接口，不会操作真机。
+
+运行全部本地测试：
+
+```bash
+./scripts/test.sh
+```
+
+## 真机开发模式
+
+先检查 Python 依赖、资源和 SocketCAN：
+
+```bash
+./scripts/doctor.sh can0
+```
+
+确认机械臂周围安全、CAN 已配置后，显式确认并启动：
+
+```bash
+export REBOTARM_HARDWARE_CONFIRM=I_UNDERSTAND_REBOTARM_WILL_MOVE
+./scripts/dev.sh --hardware
+```
+
+真机模式不会因为打开网页自动使能；仍需在控制台中连接、开启控制锁并手动使能。
+当前阶段只做本地运行与测试，桌面 App 打包将在真机验收后进行。
 
 ## 设计文档
 
 - [总体架构](docs/ARCHITECTURE.md)
 - [多产品模型](docs/PRODUCT_MODEL.md)
 - [迁移路线](docs/MIGRATION.md)
+- [本地协议](docs/PROTOCOL.md)
+- [RS 真机验收清单](docs/RS_HARDWARE_ACCEPTANCE.md)
 
 ## 发布与许可
 

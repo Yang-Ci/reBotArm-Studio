@@ -1,6 +1,6 @@
 # Migration plan
 
-## Phase 1 — RS control core
+## Phase 1 — RS control core ✅ local
 
 - Move the existing hardware manager, motion profiles, trajectory profiles, SDK and required
   configuration into `backend/`.
@@ -8,19 +8,20 @@
 - Move trajectory execution and cancellation out of ROS actions.
 - Add a fake RS driver and golden behavior tests against the existing implementation.
 
-## Phase 2 — daemon and protocol
+## Phase 2 — daemon and protocol ✅ local
 
 - Implement the single-owner `rebotd` lifecycle.
 - Add product selection, command sequencing, status streaming, session leases, and watchdogs.
 - Implement the RS driver behind a common driver protocol.
 
-## Phase 3 — user interface and simulation
+## Phase 3 — user interface and simulation 🚧
 
-- Port the existing control UI to `RobotClient`.
-- Move the current Web MuJoCo implementation into `frontend/web-mujoco`.
-- Provide explicit product and hardware/simulation selectors.
+- The existing RS control UI now uses the `rebotd` compatibility client.
+- Web MuJoCo and its B601-RS assets now live in `frontend/web-mujoco` and `assets/mujoco`.
+- Remaining: consolidate both pages behind the final product/mode selector and port the
+  optional RealSense/LLM helpers without restoring a ROS runtime dependency.
 
-## Phase 4 — packaging
+## Phase 4 — packaging (after local and hardware acceptance)
 
 - Bundle the frontend in Electron.
 - Package Python 3.11 and native control dependencies as an onedir backend bundle.
@@ -31,4 +32,3 @@
 - Import the DM model and validated controller into a new `damiao_serial_can` driver.
 - Run the same contract suite with DM-specific limits and hardware acceptance checks.
 - Change B601-DM availability from `planned` to `supported` only after verification.
-
