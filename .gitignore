@@ -1,0 +1,33 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# JavaScript
+node_modules/
+dist/
+.vite/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+build/
+*.egg-info/
+
+# Desktop packaging
+release/
+src-tauri/target/
+
+# Robot/runtime data
+*.bag
+*.db3
+logs/
+recordings/
+crash-dumps/
+
+# IDE
+.idea/
+.vscode/
+

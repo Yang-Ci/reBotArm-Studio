@@ -1,0 +1,18 @@
+{
+  "name": "rebotarm-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ROS-free desktop control and digital twin application for reBotArm products",
+  "workspaces": [
+    "apps/*",
+    "frontend/*",
+    "protocol/typescript"
+  ],
+  "scripts": {
+    "test:backend": "python3 -m unittest discover -s backend/tests -v",
+    "products": "PYTHONPATH=backend/src python3 -m rebotd products list"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

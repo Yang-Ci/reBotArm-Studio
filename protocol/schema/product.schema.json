@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rebotarm.local/schemas/product.schema.json",
+  "title": "reBotArm product definition",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "displayName",
+    "family",
+    "availability",
+    "driver",
+    "transport",
+    "joints",
+    "capabilities",
+    "assets"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "displayName": { "type": "string", "minLength": 1 },
+    "family": { "type": "string", "minLength": 1 },
+    "availability": {
+      "type": "string",
+      "enum": ["supported", "planned", "disabled"]
+    },
+    "driver": { "type": "string", "minLength": 1 },
+    "transport": {
+      "type": "object",
+      "required": ["kind", "defaultChannel"],
+      "properties": {
+        "kind": { "type": "string" },
+        "defaultChannel": { "type": "string" },
+        "bitrate": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": true
+    },
+    "joints": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "capabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "assets": {
+      "type": "object",
+      "required": ["robotModel", "mujocoModel"],
+      "properties": {
+        "robotModel": { "type": "string" },
+        "mujocoModel": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "$schema": "../../protocol/schema/product.schema.json",
+  "id": "b601-rs",
+  "displayName": "ReBotArm B601-RS",
+  "family": "B601",
+  "availability": "supported",
+  "driver": "robstride_socketcan",
+  "transport": {
+    "kind": "socketcan",
+    "defaultChannel": "can0",
+    "bitrate": 1000000
+  },
+  "joints": [
+    "joint1",
+    "joint2",
+    "joint3",
+    "joint4",
+    "joint5",
+    "joint6",
+    "gripper"
+  ],
+  "capabilities": [
+    "joint_streaming",
+    "tcp_control",
+    "gripper",
+    "trajectory",
+    "teaching",
+    "safe_home",
+    "set_zero",
+    "gravity_compensation",
+    "web_mujoco",
+    "mcp"
+  ],
+  "assets": {
+    "robotModel": "assets/robot/b601-rs",
+    "mujocoModel": "assets/mujoco/b601-rs/rs_grasp_scene.xml"
+  }
+}
+

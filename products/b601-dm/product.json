@@ -1,0 +1,38 @@
+{
+  "$schema": "../../protocol/schema/product.schema.json",
+  "id": "b601-dm",
+  "displayName": "ReBotArm B601-DM",
+  "family": "B601",
+  "availability": "planned",
+  "driver": "damiao_serial_can",
+  "transport": {
+    "kind": "serial_can_bridge",
+    "defaultChannel": "/dev/ttyACM0"
+  },
+  "joints": [
+    "joint1",
+    "joint2",
+    "joint3",
+    "joint4",
+    "joint5",
+    "joint6",
+    "gripper"
+  ],
+  "capabilities": [
+    "joint_streaming",
+    "tcp_control",
+    "gripper",
+    "trajectory",
+    "teaching",
+    "safe_home",
+    "set_zero",
+    "gravity_compensation",
+    "web_mujoco",
+    "mcp"
+  ],
+  "assets": {
+    "robotModel": "assets/robot/b601-dm",
+    "mujocoModel": "assets/mujoco/b601-dm/scene.xml"
+  }
+}
+
