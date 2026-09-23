@@ -16,6 +16,9 @@ Renderer ── RobotClient ── Web MuJoCo Worker (simulation mode)
 
 The renderer never owns a CAN or serial connection. `rebotd` is the single writer for real
 hardware and continues to enforce arbitration and watchdog behavior if the UI disconnects.
+It starts detached, exposes passive transport discovery to the renderer, and only constructs a
+product driver after an explicit in-App safety confirmation. The packaged Electron main process
+will start and supervise `rebotd`; users never need a terminal command to attach hardware.
 
 ## Layers
 

@@ -89,5 +89,126 @@ class RobotServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.driver.enabled)
 
 
+class DetachedRobotServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.created: list[FakeRSDriver] = []
+
+        def factory(*, channel: str):
+            self.assertEqual(channel, "can0")
+            driver = FakeRSDriver()
+            self.created.append(driver)
+            return driver
+
+        self.service = RobotService(
+            product_id="b601-rs",
+            driver_factory=factory,
+            can_scanner=lambda: [{
+                "channel": "can0",
+                "driver": "peak_usb",
+                "adapter": "PEAK-System PCAN-USB",
+                "isUp": True,
+                "carrier": True,
+                "state": "ERROR-ACTIVE",
+                "bitrate": 1_000_000,
+                "txErrors": 0,
+                "rxErrors": 0,
+                "ready": True,
+            }],
+        )
+
+    async def test_scan_connect_and_safe_disconnect(self) -> None:
+        hello = await self.service.dispatch("system.hello")
+        self.assertFalse(hello["hardwareConnected"])
+        snapshot = await self.service.dispatch("system.status")
+        self.assertEqual(snapshot["stateMachine"], "DISCONNECTED")
+
+        scanned = await self.service.dispatch("hardware.scan")
+        self.assertEqual(scanned["interfaces"][0]["adapter"], "PEAK-System PCAN-USB")
+        connected = await self.service.dispatch("hardware.connect", {
+            "channel": "can0",
+            "productId": "b601-rs",
+            "confirm": "I_UNDERSTAND_REBOTARM_WILL_MOVE",
+        })
+        self.assertTrue(connected["connected"])
+        self.assertTrue(self.service.hardware_connected)
+
+        disconnected = await self.service.dispatch("hardware.disconnect")
+        self.assertFalse(disconnected["connected"])
+        self.assertFalse(self.service.hardware_connected)
+        self.assertFalse(self.created[0].enabled)
+
+    async def test_connect_requires_explicit_confirmation(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "safety confirmation"):
+            await self.service.dispatch("hardware.connect", {"channel": "can0"})
+
+    async def test_commands_are_rejected_while_detached(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "no robot is connected"):
+            await self.service.dispatch("arm.enable")
+
+    async def test_connect_configures_an_unready_interface(self) -> None:
+        configured = []
+        scans = 0
+
+        def scanner():
+            nonlocal scans
+            scans += 1
+            return [{
+                "channel": "can0",
+                "driver": "peak_usb",
+                "adapter": "PEAK-System PCAN-USB",
+                "state": "STOPPED" if scans == 1 else "ERROR-ACTIVE",
+                "bitrate": 0 if scans == 1 else 1_000_000,
+                "ready": scans > 1,
+            }]
+
+        service = RobotService(
+            product_id="b601-rs",
+            driver_factory=lambda *, channel: FakeRSDriver(),
+            can_scanner=scanner,
+            can_configurer=configured.append,
+        )
+        result = await service.dispatch("hardware.connect", {
+            "channel": "can0",
+            "productId": "b601-rs",
+            "confirm": "I_UNDERSTAND_REBOTARM_WILL_MOVE",
+        })
+
+        self.assertTrue(result["connected"])
+        self.assertEqual(configured, ["can0"])
+        service.shutdown()
+
+    async def test_failed_driver_connect_is_safely_cleaned_up(self) -> None:
+        class FailingDriver(FakeRSDriver):
+            def __init__(self) -> None:
+                super().__init__()
+                self.cleaned_up = False
+
+            def connect(self) -> None:
+                super().connect()
+                raise RuntimeError("simulated connection failure")
+
+            def shutdown(self, disable_after_safe_home: bool = True) -> None:
+                self.cleaned_up = True
+                super().shutdown(disable_after_safe_home)
+
+        candidate = FailingDriver()
+        service = RobotService(
+            product_id="b601-rs",
+            driver_factory=lambda *, channel: candidate,
+            can_scanner=self.service._can_scanner,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "simulated connection failure"):
+            await service.dispatch("hardware.connect", {
+                "channel": "can0",
+                "productId": "b601-rs",
+                "confirm": "I_UNDERSTAND_REBOTARM_WILL_MOVE",
+            })
+
+        self.assertTrue(candidate.cleaned_up)
+        self.assertFalse(candidate.enabled)
+        self.assertFalse(service.hardware_connected)
+
+
 if __name__ == "__main__":
     unittest.main()

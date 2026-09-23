@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
 
+from .can_discovery import configure_socketcan, scan_socketcan
 from .trajectory import TrajectoryExecutor
 
 GRIPPER_TRAVEL_M = 0.0715
@@ -25,12 +28,45 @@ def gripper_motor_to_width(position_rad: float) -> float:
 class RobotService:
     """Product-neutral command surface used by desktop IPC and WebSocket."""
 
-    def __init__(self, driver, *, product_id: str, driver_name: str) -> None:
-        self.driver = driver
+    def __init__(
+        self,
+        driver=None,
+        *,
+        product_id: str,
+        driver_name: str = "disconnected",
+        channel: str = "",
+        driver_factory: Callable[..., Any] | None = None,
+        can_scanner: Callable[[], list[dict[str, Any]]] = scan_socketcan,
+        can_configurer: Callable[[str], None] = configure_socketcan,
+    ) -> None:
+        self._driver = driver
         self.product_id = product_id
-        self.driver_name = driver_name
-        self.trajectory = TrajectoryExecutor(driver)
+        self._driver_name = driver_name
+        self._driver_factory = driver_factory
+        self._can_scanner = can_scanner
+        self._can_configurer = can_configurer
+        self._hardware_lock = asyncio.Lock()
+        self._channel = channel if driver is not None else ""
+        self.trajectory = None if driver is None else TrajectoryExecutor(driver)
         self.started_at = time.time()
+
+    @property
+    def driver(self):
+        if self._driver is None:
+            raise RuntimeError("no robot is connected; scan and connect a CAN device first")
+        return self._driver
+
+    @property
+    def hardware_connected(self) -> bool:
+        return self._driver is not None
+
+    @property
+    def driver_enabled(self) -> bool:
+        return bool(self._driver is not None and self._driver.enabled)
+
+    @property
+    def driver_name(self) -> str:
+        return self._driver_name if self._driver is not None else "disconnected"
 
     async def dispatch(self, method: str, params: dict[str, Any] | None = None) -> Any:
         params = params or {}
@@ -38,6 +74,9 @@ class RobotService:
             "system.hello": self._hello,
             "system.ping": self._ping,
             "system.status": self.snapshot,
+            "hardware.scan": self._scan_hardware,
+            "hardware.connect": self._connect_hardware,
+            "hardware.disconnect": self._disconnect_hardware,
             "arm.enable": self._enable,
             "arm.disable": self._safe_disable,
             "arm.safe_home": self._safe_home,
@@ -73,7 +112,13 @@ class RobotService:
             "protocolVersion": 1,
             "productId": self.product_id,
             "driver": self.driver_name,
-            "jointNames": list(self.driver.joint_names),
+            "hardwareConnected": self.hardware_connected,
+            "channel": self._channel,
+            "jointNames": (
+                list(self._driver.joint_names)
+                if self._driver is not None
+                else [f"joint{index}" for index in range(1, 7)]
+            ),
             "capabilities": [
                 "joint_streaming",
                 "tcp_control",
@@ -90,39 +135,78 @@ class RobotService:
         return {"time": time.time()}
 
     async def snapshot(self, _params: dict | None = None, *, request_feedback: bool = True) -> dict:
+        if self._driver is None:
+            return self._disconnected_snapshot()
         return await asyncio.to_thread(self._snapshot_sync, request_feedback)
 
+    def _disconnected_snapshot(self) -> dict:
+        zeros = [0.0] * 6
+        return {
+            "timestamp": time.time(),
+            "productId": self.product_id,
+            "driver": "disconnected",
+            "hardwareConnected": False,
+            "channel": "",
+            "enabled": False,
+            "mode": "disconnected",
+            "stateMachine": "DISCONNECTED",
+            "controlLoopActive": False,
+            "jointNames": [f"joint{index}" for index in range(1, 7)],
+            "position": zeros,
+            "velocity": zeros,
+            "torque": zeros,
+            "statusCodes": [0] * 6,
+            "errors": [],
+            "controlTarget": zeros,
+            "controlReference": zeros,
+            "referenceVelocity": zeros,
+            "referenceAcceleration": zeros,
+            "gravity": {"active": False, "fault": ""},
+            "gripper": {
+                "positionRad": 0.0,
+                "widthM": 0.0,
+                "velocity": 0.0,
+                "torque": 0.0,
+                "statusCode": 0,
+                "manualFree": False,
+                "assistActive": False,
+            },
+        }
+
     def _snapshot_sync(self, request_feedback: bool) -> dict:
-        position, velocity, torque = self.driver.get_joint_state(
+        driver = self.driver
+        position, velocity, torque = driver.get_joint_state(
             request_feedback=request_feedback
         )
         target, reference, reference_velocity, reference_acceleration = (
-            self.driver.get_control_reference()
+            driver.get_control_reference()
         )
         gripper_position, gripper_velocity, gripper_torque, gripper_status = (
-            self.driver.get_gripper_state(request_feedback=False)
+            driver.get_gripper_state(request_feedback=False)
         )
         return {
             "timestamp": time.time(),
             "productId": self.product_id,
             "driver": self.driver_name,
-            "enabled": bool(self.driver.enabled),
-            "mode": str(self.driver.mode),
-            "stateMachine": str(self.driver.state_machine),
-            "controlLoopActive": bool(self.driver.control_loop_active),
-            "jointNames": list(self.driver.joint_names),
+            "hardwareConnected": True,
+            "channel": self._channel,
+            "enabled": bool(driver.enabled),
+            "mode": str(driver.mode),
+            "stateMachine": str(driver.state_machine),
+            "controlLoopActive": bool(driver.control_loop_active),
+            "jointNames": list(driver.joint_names),
             "position": np.asarray(position, dtype=float).tolist(),
             "velocity": np.asarray(velocity, dtype=float).tolist(),
             "torque": np.asarray(torque, dtype=float).tolist(),
-            "statusCodes": [int(value) for value in self.driver.get_joint_status_codes()],
-            "errors": list(self.driver.error_codes),
+            "statusCodes": [int(value) for value in driver.get_joint_status_codes()],
+            "errors": list(driver.error_codes),
             "controlTarget": np.asarray(target, dtype=float).tolist(),
             "controlReference": np.asarray(reference, dtype=float).tolist(),
             "referenceVelocity": np.asarray(reference_velocity, dtype=float).tolist(),
             "referenceAcceleration": np.asarray(reference_acceleration, dtype=float).tolist(),
             "gravity": {
-                "active": bool(self.driver.gravity_compensation_active()),
-                "fault": str(self.driver.gravity_compensation_fault()),
+                "active": bool(driver.gravity_compensation_active()),
+                "fault": str(driver.gravity_compensation_fault()),
             },
             "gripper": {
                 "positionRad": float(gripper_position),
@@ -130,10 +214,88 @@ class RobotService:
                 "velocity": float(gripper_velocity),
                 "torque": float(gripper_torque),
                 "statusCode": int(gripper_status),
-                "manualFree": bool(self.driver.gripper_manual_free()),
-                "assistActive": bool(self.driver.gripper_assist_active()),
+                "manualFree": bool(driver.gripper_manual_free()),
+                "assistActive": bool(driver.gripper_assist_active()),
             },
         }
+
+    def _scan_hardware(self, _params: dict) -> dict:
+        return {
+            "interfaces": self._can_scanner(),
+            "connected": self.hardware_connected,
+            "connectedChannel": self._channel,
+            "driver": self.driver_name,
+        }
+
+    async def _connect_hardware(self, params: dict) -> dict:
+        channel = str(params.get("channel", "can0")).strip()
+        confirmation = str(params.get("confirm", ""))
+        if confirmation != "I_UNDERSTAND_REBOTARM_WILL_MOVE":
+            raise RuntimeError("hardware connection requires explicit motion safety confirmation")
+        if str(params.get("productId", self.product_id)) != self.product_id:
+            raise ValueError(f"this daemon is configured for {self.product_id}")
+        async with self._hardware_lock:
+            if self._driver is not None:
+                if channel == self._channel:
+                    return {"connected": True, "channel": channel, "driver": self.driver_name}
+                location = self._channel or "another driver"
+                raise RuntimeError(f"a robot is already connected on {location}")
+            if self._driver_factory is None:
+                raise RuntimeError("this daemon does not support attaching hardware")
+            interfaces = self._can_scanner()
+            selected = next((item for item in interfaces if item["channel"] == channel), None)
+            if selected is None:
+                raise RuntimeError(f"CAN interface {channel!r} was not found")
+            if not selected.get("ready"):
+                await asyncio.to_thread(self._can_configurer, channel)
+                interfaces = self._can_scanner()
+                selected = next(
+                    (item for item in interfaces if item["channel"] == channel),
+                    None,
+                )
+                if selected is None or not selected.get("ready"):
+                    raise RuntimeError(
+                        f"CAN interface {channel!r} did not become ready at 1 Mbps"
+                    )
+            candidate = self._driver_factory(channel=channel)
+            try:
+                await asyncio.to_thread(candidate.connect)
+            except Exception:
+                with contextlib.suppress(Exception):
+                    await asyncio.to_thread(candidate.shutdown, True)
+                raise
+            self._driver = candidate
+            self._driver_name = "robstride_socketcan"
+            self._channel = channel
+            self.trajectory = TrajectoryExecutor(candidate)
+            return {
+                "connected": True,
+                "channel": channel,
+                "driver": self.driver_name,
+                "adapter": selected.get("adapter", "SocketCAN"),
+            }
+
+    async def _disconnect_hardware(self, _params: dict) -> dict:
+        async with self._hardware_lock:
+            if self._driver is None:
+                return {"connected": False, "message": "hardware already disconnected"}
+            driver = self._driver
+            await asyncio.to_thread(driver.shutdown, True)
+            self._driver = None
+            self._driver_name = "disconnected"
+            self._channel = ""
+            self.trajectory = None
+            return {"connected": False, "message": "safe shutdown complete"}
+
+    def shutdown(self) -> None:
+        driver = self._driver
+        if driver is None:
+            return
+        driver.shutdown(disable_after_safe_home=True)
+        self._driver = None
+        self._driver_name = "disconnected"
+        self._channel = ""
+        self.trajectory = None
 
     async def _enable(self, _params: dict) -> dict:
         await asyncio.to_thread(self.driver.enable)
@@ -212,6 +374,8 @@ class RobotService:
         return {"accepted": True, "positions": targets}
 
     async def _execute_trajectory(self, params: dict) -> dict:
+        if self.trajectory is None:
+            raise RuntimeError("no robot is connected; scan and connect a CAN device first")
         points = list(params.get("points") or [])
         teaching = bool(params.get("teaching", False))
         return await asyncio.to_thread(
@@ -219,6 +383,8 @@ class RobotService:
         )
 
     def _cancel_trajectory(self, _params: dict) -> dict:
+        if self.trajectory is None:
+            return {"cancelRequested": False}
         return {"cancelRequested": self.trajectory.cancel()}
 
     async def _move_ik(self, params: dict) -> dict:
@@ -237,7 +403,8 @@ class RobotService:
 
     @staticmethod
     def _pose_params(params: dict) -> tuple[float, float, float, float, float, float]:
-        return tuple(float(params.get(name, 0.0)) for name in ("x", "y", "z", "roll", "pitch", "yaw"))
+        names = ("x", "y", "z", "roll", "pitch", "yaw")
+        return tuple(float(params.get(name, 0.0)) for name in names)
 
     async def _set_gripper(self, params: dict) -> dict:
         if "widthM" in params:
@@ -249,7 +416,11 @@ class RobotService:
             reached, position = await asyncio.to_thread(
                 self.driver.set_gripper_position, target, float(params.get("timeout", 3.0))
             )
-            return {"reached": bool(reached), "positionRad": float(position), "widthM": gripper_motor_to_width(position)}
+            return {
+                "reached": bool(reached),
+                "positionRad": float(position),
+                "widthM": gripper_motor_to_width(position),
+            }
         await asyncio.to_thread(self.driver.set_gripper_target, target)
         return {"accepted": True, "positionRad": target, "widthM": gripper_motor_to_width(target)}
 

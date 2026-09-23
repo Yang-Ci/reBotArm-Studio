@@ -10,9 +10,12 @@ velocity and without payload.
   `backend/config/rebotarm_hardware.yaml`.
 - Confirm `can0` is up at 1 Mbit/s and `./scripts/doctor.sh can0` reports all checks `OK`.
 - Verify each joint can be disabled by the physical emergency stop.
-- Start `./scripts/dev.sh --hardware` only after setting the explicit hardware confirmation.
-- Connect the browser while its control lock remains off; compare all six joint readings with
-  the physical arm.
+- Start `./scripts/dev.sh`, open the RS console, and confirm the local service connects
+  automatically while the arm remains detached.
+- Use “扫描 CAN” and verify the App identifies the PCAN adapter, `can0`, 1 Mbit/s, and a
+  non-BUS-OFF state without transmitting frames.
+- Complete the in-App safety confirmation and connect while the control lock remains off;
+  compare all six joint readings with the physical arm.
 
 ## Controlled checks
 
@@ -24,7 +27,8 @@ velocity and without payload.
 - Test TCP IK and Cartesian trajectory in the centre of the reachable workspace.
 - Test gravity compensation start/stop while ready to use the emergency stop.
 - Disconnect the browser and verify the daemon watchdog holds the current pose.
-- Terminate the local launcher and verify safe-home/disable shutdown behavior.
+- Use the in-App “安全断开” action and verify safe-home/disable behavior and CAN release.
+- Terminate the local launcher and verify the same safe-home/disable shutdown behavior.
 
 ## Record
 

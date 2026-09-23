@@ -30,7 +30,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     serve = commands.add_parser("serve", help="run the local robot daemon")
     serve.add_argument("--product", default="b601-rs")
-    serve.add_argument("--driver", choices=("fake", "rs"), default="fake")
+    serve.add_argument(
+        "--driver",
+        choices=("disconnected", "fake", "rs"),
+        default="disconnected",
+        help="start detached for in-app CAN discovery, or select a test/legacy direct driver",
+    )
     serve.add_argument("--channel", default="can0")
     serve.add_argument("--hardware-config", default="")
     serve.add_argument("--host", default="127.0.0.1")
@@ -106,34 +111,44 @@ def _serve(args, registry: ProductRegistry) -> int:
             f"no runtime driver is implemented for {product.product_id}"
         )
 
+    from .drivers import create_rs_driver
+
+    driver = None
+    driver_name = "disconnected"
     if args.driver == "rs":
         confirmation = args.confirm or os.environ.get("REBOTARM_HARDWARE_CONFIRM", "")
         if confirmation != "I_UNDERSTAND_REBOTARM_WILL_MOVE":
             raise ProductRegistryError(
                 "real hardware requires --confirm I_UNDERSTAND_REBOTARM_WILL_MOVE"
             )
-        from .drivers import create_rs_driver
-
         driver = create_rs_driver(
             channel=args.channel,
             hardware_config=args.hardware_config or None,
         )
         driver_name = "robstride_socketcan"
     else:
-        from .drivers import FakeRSDriver
+        if args.driver == "fake":
+            from .drivers import FakeRSDriver
 
-        driver = FakeRSDriver()
-        driver_name = "fake_rs"
+            driver = FakeRSDriver()
+            driver_name = "fake_rs"
 
     from .server import RebotdServer
     from .service import RobotService
 
-    driver.connect()
+    if driver is not None:
+        driver.connect()
+    service = None
     try:
         service = RobotService(
             driver,
             product_id=product.product_id,
             driver_name=driver_name,
+            channel=args.channel if args.driver == "rs" else "",
+            driver_factory=lambda *, channel: create_rs_driver(
+                channel=channel,
+                hardware_config=args.hardware_config or None,
+            ),
         )
         server = RebotdServer(
             service,
@@ -150,5 +165,8 @@ def _serve(args, registry: ProductRegistry) -> int:
     except KeyboardInterrupt:
         print("rebotd: stopping")
     finally:
-        driver.shutdown(disable_after_safe_home=True)
+        if service is not None:
+            service.shutdown()
+        elif driver is not None:
+            driver.shutdown(disable_after_safe_home=True)
     return 0

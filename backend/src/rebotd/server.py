@@ -169,7 +169,7 @@ class RebotdServer:
                 client for client in self.clients
                 if time.monotonic() - client.last_seen <= self.lease_timeout
             ]
-            if live or self._watchdog_held or not self.service.driver.enabled:
+            if live or self._watchdog_held or not self.service.driver_enabled:
                 continue
             self._watchdog_held = True
             LOGGER.warning("control lease expired; holding current position")

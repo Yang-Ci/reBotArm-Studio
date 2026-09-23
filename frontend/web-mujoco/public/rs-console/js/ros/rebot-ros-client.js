@@ -34,6 +34,7 @@
         this.connected = true;
         try {
           this._hello = await this._rpc('system.hello', {}, 5000);
+          this._emitHardwareState(this._hello);
           this._emitStatus('open', `${this._hello.productId || 'RS'} 已连接`);
           this._startHeartbeat();
         } catch (error) {
@@ -89,6 +90,30 @@
 
     enable() {
       return this._trigger('arm.enable');
+    }
+
+    scanHardware() {
+      return this._rpc('hardware.scan', {}, 5000);
+    }
+
+    connectHardware(channel, productId) {
+      return this._rpc('hardware.connect', {
+        channel,
+        productId: productId || 'b601-rs',
+        confirm: 'I_UNDERSTAND_REBOTARM_WILL_MOVE'
+      }, 30000).then(async (result) => {
+        this._hello = await this._rpc('system.hello', {}, 5000);
+        this._emitHardwareState(this._hello);
+        return result;
+      });
+    }
+
+    disconnectHardware() {
+      return this._rpc('hardware.disconnect', {}, 45000).then(async (result) => {
+        this._hello = await this._rpc('system.hello', {}, 5000);
+        this._emitHardwareState(this._hello);
+        return result;
+      });
     }
 
     disable() {
@@ -344,6 +369,7 @@
         effort: data.torque || []
       };
       const ns = `/${this.namespace}`;
+      this._emitHardwareState(data);
       this._emitTopic(`${ns}/joint_states`, jointMessage);
       this._emitTopic(`${ns}/mujoco/joint_states`, jointMessage);
       const gripper = data.gripper || {};
@@ -376,6 +402,16 @@
       this._lastTopicDelivery.set(topic, now);
       this._lastMessageAt.set(topic, now);
       subscription.callback(message, topic);
+    }
+
+    _emitHardwareState(data) {
+      this.dispatchEvent(new CustomEvent('hardware-state', { detail: {
+        connected: Boolean(data && data.hardwareConnected),
+        driver: data && data.driver ? data.driver : 'disconnected',
+        channel: data && data.channel ? data.channel : '',
+        enabled: Boolean(data && data.enabled),
+        stateMachine: data && data.stateMachine ? data.stateMachine : 'DISCONNECTED'
+      } }));
     }
 
     _startHeartbeat() {

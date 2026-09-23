@@ -86,6 +86,12 @@
     controlLabel: document.getElementById('ros-control-label'),
     status: document.getElementById('ros-status'),
     message: document.getElementById('ros-message'),
+    canStatus: document.getElementById('can-status'),
+    canDevice: document.getElementById('can-device'),
+    canScan: document.getElementById('can-scan'),
+    canConnect: document.getElementById('can-connect'),
+    canDisconnect: document.getElementById('can-disconnect'),
+    canSafetyConfirm: document.getElementById('can-safety-confirm'),
     feedbackError: document.getElementById('ros-feedback-error'),
     enable: document.getElementById('ros-enable'),
     disable: document.getElementById('ros-disable'),
@@ -161,7 +167,7 @@
       : '等待识别 RS Fake Driver';
   }
 
-  if (els.url && !els.url.value) {
+  if (els.url) {
     const saved = loadSavedUrl();
     if (saved) els.url.value = saved;
   }
@@ -190,6 +196,12 @@
  const MIRROR_HOLD_MS = 1800;
  let latestJointPositions = null;
  let rosBackend = 'unknown';
+ let hardwareConnected = false;
+ let connectedCanChannel = '';
+ let connectedDriver = 'disconnected';
+ let canScanBusy = false;
+ let hardwareConnectBusy = false;
+ const canInterfaces = new Map();
  let latestArmEnabled = false;
   let latestJointStateAt = 0;
   let latestMujocoStateAt = 0;
@@ -275,6 +287,7 @@
     }
     updateDiagnostics();
    if (detail.state === 'closed' || detail.state === 'error') {
+     updateHardwareConnectionUi({ connected: false, localServiceOffline: true });
      finishHardwareTeachLocal(detail.state === 'error' ? 'ROS 连接异常，真机示教已停止' : 'ROS 连接断开，真机示教已停止');
      resetFeedbackRenderer();
      updateGravityStatus(false, t('msg.rosNotConnected'), 'connection');
@@ -282,8 +295,13 @@
    if (detail.state === 'open') {
      window.setTimeout(() => {
        runDiagnostics();
+       if (TARGET_KEY === 'hardware') void scanCanDevices({ silent: true });
      }, 250);
    }
+  });
+
+  client.addEventListener('hardware-state', (event) => {
+    updateHardwareConnectionUi(event.detail || {});
   });
 
   els.connect.addEventListener('click', () => {
@@ -294,6 +312,11 @@
     client.connect(nextUrl);
  });
  els.disconnect.addEventListener('click', disconnectRos);
+ els.canScan?.addEventListener('click', () => void scanCanDevices());
+ els.canDevice?.addEventListener('change', updateCanActionState);
+ els.canSafetyConfirm?.addEventListener('change', updateCanActionState);
+ els.canConnect?.addEventListener('click', () => void connectSelectedHardware());
+ els.canDisconnect?.addEventListener('click', () => void disconnectSelectedHardware());
  window.addEventListener('pagehide', () => {
    client.autoReconnect = false;
    if (client.socket) client.socket.close();
@@ -378,6 +401,16 @@
  els.clearLog.addEventListener('click', () => { els.log.innerHTML = ''; });
   els.checkIk.addEventListener('click', checkIk);
   document.getElementById('ros-help-top')?.addEventListener('click', () => document.getElementById('ros-help-dialog')?.showModal());
+
+  updateHardwareConnectionUi({ connected: false, localServiceOffline: true });
+  window.setTimeout(() => {
+    if (!client.connected && (!client.socket || client.socket.readyState > WebSocket.CONNECTING)) {
+      const nextUrl = els.url.value.trim();
+      if (!canConnectWebSocketUrl(nextUrl)) return;
+      client.autoReconnect = true;
+      client.connect(nextUrl);
+    }
+  }, 0);
   document.getElementById('ros-help-close')?.addEventListener('click', () => document.getElementById('ros-help-dialog')?.close());
   const sidebar = document.querySelector('.control-panel');
   const appShell = document.querySelector('.app-shell');
@@ -1810,6 +1843,184 @@
     }
   }
 
+  function updateHardwareConnectionUi(state) {
+    const previousConnected = hardwareConnected;
+    hardwareConnected = Boolean(state.connected) && !state.localServiceOffline;
+    connectedCanChannel = hardwareConnected ? String(state.channel || connectedCanChannel || '') : '';
+    connectedDriver = hardwareConnected ? String(state.driver || connectedDriver || 'unknown') : 'disconnected';
+
+    if (els.canStatus) {
+      if (state.localServiceOffline) {
+        els.canStatus.textContent = '本地服务离线';
+      } else if (hardwareConnected) {
+        const label = connectedCanChannel || (connectedDriver.startsWith('fake') ? 'Fake RS' : connectedDriver);
+        els.canStatus.textContent = `已连接 ${label}`;
+      } else if (canInterfaces.size) {
+        const readyCount = Array.from(canInterfaces.values()).filter((item) => item.ready).length;
+        els.canStatus.textContent = readyCount
+          ? `发现 ${canInterfaces.size} 个 CAN，${readyCount} 个已就绪`
+          : `发现 ${canInterfaces.size} 个 CAN，连接时自动配置`;
+      } else {
+        els.canStatus.textContent = '未连接机械臂';
+      }
+    }
+
+    if (!hardwareConnected && els.control) {
+      els.control.checked = false;
+      els.control.disabled = true;
+    }
+    if (hardwareConnected && connectedDriver) updateRosBackend('', connectedDriver);
+    if (!hardwareConnected) updateRosBackend('disconnected');
+    updateCanActionState();
+
+    if (previousConnected !== hardwareConnected) {
+      writeLog(
+        hardwareConnected
+          ? `机械臂已连接${connectedCanChannel ? `：${connectedCanChannel}` : ''}`
+          : '机械臂未连接，控制命令已锁定',
+        hardwareConnected ? 'ok' : 'info'
+      );
+    }
+  }
+
+  function updateCanActionState() {
+    const selected = canInterfaces.get(els.canDevice?.value || '');
+    const serviceReady = Boolean(client.connected);
+    if (els.canScan) els.canScan.disabled = !serviceReady || canScanBusy || hardwareConnectBusy;
+    if (els.canDevice) els.canDevice.disabled = !serviceReady || hardwareConnected || canScanBusy || hardwareConnectBusy;
+    if (els.canConnect) {
+      els.canConnect.disabled = !serviceReady
+        || hardwareConnected
+        || hardwareConnectBusy
+        || !selected
+        || !els.canSafetyConfirm?.checked;
+    }
+    if (els.canDisconnect) {
+      els.canDisconnect.disabled = !serviceReady || !hardwareConnected || hardwareConnectBusy;
+    }
+    if (els.canSafetyConfirm) {
+      els.canSafetyConfirm.disabled = !serviceReady || hardwareConnected || hardwareConnectBusy;
+    }
+  }
+
+  async function scanCanDevices(options) {
+    const silent = Boolean(options && options.silent);
+    if (!client.connected || canScanBusy || hardwareConnectBusy) return;
+    canScanBusy = true;
+    updateCanActionState();
+    if (els.canStatus) els.canStatus.textContent = '正在扫描…';
+    try {
+      const result = await client.scanHardware();
+      const interfaces = Array.isArray(result.interfaces) ? result.interfaces : [];
+      canInterfaces.clear();
+      interfaces.forEach((item) => canInterfaces.set(String(item.channel), item));
+
+      if (els.canDevice) {
+        const previous = result.connectedChannel || els.canDevice.value;
+        els.canDevice.replaceChildren();
+        if (!interfaces.length) {
+          const option = document.createElement('option');
+          option.value = '';
+          option.textContent = '未发现 CAN 设备';
+          els.canDevice.append(option);
+        } else {
+          interfaces.forEach((item) => {
+            const option = document.createElement('option');
+            option.value = item.channel;
+            const bitrate = item.bitrate ? `${(item.bitrate / 1000000).toFixed(0)} Mbps` : '速率未知';
+            option.textContent = `${item.adapter || item.driver || 'SocketCAN'} · ${item.channel} · ${bitrate} · ${item.state || 'UNKNOWN'}${item.ready ? '' : '（连接时配置）'}`;
+            els.canDevice.append(option);
+          });
+          const preferred = interfaces.find((item) => item.channel === previous)
+            || interfaces.find((item) => item.ready)
+            || interfaces[0];
+          els.canDevice.value = preferred.channel;
+        }
+      }
+
+      updateHardwareConnectionUi({
+        connected: Boolean(result.connected),
+        channel: result.connectedChannel || '',
+        driver: result.driver || 'disconnected'
+      });
+      if (!silent) {
+        writeLog(
+          interfaces.length ? `扫描完成，发现 ${interfaces.length} 个 CAN 接口` : '扫描完成，未发现 CAN 接口',
+          interfaces.length ? 'ok' : 'warn'
+        );
+      }
+    } catch (error) {
+      const message = `CAN 扫描失败：${error && error.message ? error.message : error}`;
+      if (els.canStatus) els.canStatus.textContent = '扫描失败';
+      setMessage(message);
+      writeLog(message, 'error');
+    } finally {
+      canScanBusy = false;
+      updateCanActionState();
+    }
+  }
+
+  async function connectSelectedHardware() {
+    if (!client.connected || hardwareConnected || hardwareConnectBusy) return;
+    const channel = els.canDevice?.value || '';
+    const selected = canInterfaces.get(channel);
+    if (!selected) {
+      setMessage('请先扫描并选择 CAN 设备');
+      return;
+    }
+    if (!els.canSafetyConfirm?.checked) {
+      setMessage('连接前请完成工作区安全确认');
+      return;
+    }
+    if (!window.confirm('连接后电机将立即进入当前位置保持，机械臂可能轻微运动。确认继续？')) return;
+
+    hardwareConnectBusy = true;
+    updateCanActionState();
+    if (els.canStatus) els.canStatus.textContent = `正在连接 ${channel}…`;
+    try {
+      const productId = client._hello && client._hello.productId ? client._hello.productId : 'b601-rs';
+      const result = await client.connectHardware(channel, productId);
+      updateHardwareConnectionUi({ connected: true, channel, driver: result.driver });
+      if (els.canSafetyConfirm) els.canSafetyConfirm.checked = false;
+      setMessage(`${channel} 已连接；请确认状态反馈后再解锁网页控制`);
+      writeLog(`${channel} 真机连接成功`, 'ok');
+    } catch (error) {
+      const message = `机械臂连接失败：${error && error.message ? error.message : error}`;
+      updateHardwareConnectionUi({ connected: false });
+      setMessage(message);
+      writeLog(message, 'error');
+    } finally {
+      hardwareConnectBusy = false;
+      updateCanActionState();
+    }
+  }
+
+  async function disconnectSelectedHardware() {
+    if (!client.connected || !hardwareConnected || hardwareConnectBusy) return;
+    if (!window.confirm('安全断开会先停止重力补偿，并在需要时回到安全零位后失能。确认继续？')) return;
+
+    hardwareConnectBusy = true;
+    updateCanActionState();
+    if (els.canStatus) els.canStatus.textContent = '正在安全断开…';
+    try {
+      await stopHardwareTeaching(true);
+      cancelLowLevelPlayback();
+      resetWebControlState();
+      await client.disconnectHardware();
+      updateHardwareConnectionUi({ connected: false });
+      setMessage('机械臂已安全断开；本地控制服务仍在运行');
+      writeLog('机械臂已安全回零、失能并断开', 'ok');
+    } catch (error) {
+      const message = `安全断开失败：${error && error.message ? error.message : error}`;
+      setMessage(message);
+      writeLog(message, 'error');
+    } finally {
+      hardwareConnectBusy = false;
+      updateCanActionState();
+      if (!hardwareConnected) await scanCanDevices({ silent: true });
+    }
+  }
+
   async function queryGravityCompensation(options) {
     const result = await guardedOptionalService(
       REQUIRED_SERVICES.gravityStatus,
@@ -1840,6 +2051,7 @@
   async function pollGripperAssistStatus() {
     if (
       !client.connected
+      || !hardwareConnected
       || gripperAssistPollInFlight
       || !listedServices.has(REQUIRED_SERVICES.gripperAssistStatus)
     ) return;
@@ -2072,6 +2284,10 @@
      if (interactive) setStatus('closed', t('msg.rosNotConnected'));
      return false;
    }
+   if (!hardwareConnected) {
+     if (interactive) setMessage('请先扫描并连接机械臂');
+     return false;
+   }
    // RS Fake Driver is auto-allowed in simulation mode.
    if (TARGET_KEY === 'simulation' && rosBackend === 'fake-rs') return true;
     if (!els.control.checked) {
@@ -2081,10 +2297,12 @@
     return true;
   }
 
-  function updateRosBackend(mode) {
-    const text = String(mode || '').toLowerCase();
+  function updateRosBackend(mode, driverOverride) {
+    const text = String(driverOverride || connectedDriver || mode || '').toLowerCase();
     let nextBackend = 'real-or-unknown';
-    if (text.startsWith('fake_rs_')) {
+    if (text === 'disconnected') {
+      nextBackend = 'disconnected';
+    } else if (text.startsWith('fake_rs')) {
       nextBackend = TARGET_KEY === 'simulation' ? 'fake-rs' : 'fake-other';
     } else if (text.startsWith('fake_') || TARGET_KEY === 'simulation') {
       nextBackend = 'fake-other';
@@ -2100,8 +2318,15 @@
       return;
     }
 
-    // For hardware mode, respect the user's manual choice — never auto-uncheck.
-    // Only disable control if the target/driver is mismatched (fake-other).
+    if (nextBackend === 'disconnected') {
+      els.control.checked = false;
+      els.control.disabled = true;
+      if (els.controlLabel) els.controlLabel.textContent = '连接机械臂后可解锁网页控制';
+      return;
+    }
+
+    // For hardware mode, respect the user's manual choice. Only disable
+    // control if the target/driver is mismatched.
     els.control.disabled = nextBackend === 'fake-other';
     if (els.controlLabel) {
       els.controlLabel.textContent = nextBackend === 'fake-other'

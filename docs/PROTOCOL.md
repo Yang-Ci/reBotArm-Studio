@@ -16,6 +16,7 @@ Notifications omit `id` and do not receive a response. Errors for requests use
 ## Commands
 
 - `system.hello`, `system.ping`, `system.status`
+- `hardware.scan`, `hardware.connect`, `hardware.disconnect`
 - `arm.enable`, `arm.disable`, `arm.safe_home`, `arm.hold`, `arm.set_zero`
 - `joint.set_target`, `joint.set_targets`
 - `trajectory.execute`, `trajectory.cancel`
@@ -26,6 +27,14 @@ Notifications omit `id` and do not receive a response. Errors for requests use
 
 Joint angles use radians, angular velocity uses radians per second, gripper width uses metres,
 and Cartesian positions use metres. Trajectory point time is seconds.
+
+`hardware.scan` is passive: it enumerates SocketCAN interfaces without opening the bus or
+transmitting frames. `hardware.connect` requires the selected interface, matching product ID,
+and an explicit motion-safety confirmation. After confirmation it configures a stopped or
+misconfigured interface to 1 Mbit/s before opening the driver. The packaged service must receive
+only the OS network capability needed for that operation. `hardware.disconnect` performs the
+driver's safe shutdown before releasing the interface. All motion commands fail while no driver
+is attached.
 
 ## Telemetry
 

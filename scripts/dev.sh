@@ -3,17 +3,13 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REBOTD="${REPO_DIR}/backend/.venv/bin/rebotd"
-DRIVER="fake"
+DRIVER="disconnected"
 
-if [[ "${1:-}" == "--hardware" ]]; then
-  DRIVER="rs"
-  if [[ "${REBOTARM_HARDWARE_CONFIRM:-}" != "I_UNDERSTAND_REBOTARM_WILL_MOVE" ]]; then
-    echo "真机模式会驱动机械臂。确认安全后设置：" >&2
-    echo "  export REBOTARM_HARDWARE_CONFIRM=I_UNDERSTAND_REBOTARM_WILL_MOVE" >&2
-    exit 2
-  fi
+if [[ "${1:-}" == "--fake" ]]; then
+  DRIVER="fake"
 elif [[ -n "${1:-}" ]]; then
-  echo "用法: ./scripts/dev.sh [--hardware]" >&2
+  echo "用法: ./scripts/dev.sh [--fake]" >&2
+  echo "真机连接请在 RS 控制台内扫描 CAN 并完成安全确认。" >&2
   exit 2
 fi
 
@@ -44,6 +40,9 @@ fi
 echo "reBotArm Studio 已启动（driver=${DRIVER}）"
 echo "数字孪生: http://127.0.0.1:5173"
 echo "RS 控制台: http://127.0.0.1:5173/rs-console/index.html"
+if [[ "${DRIVER}" == "disconnected" ]]; then
+  echo "请在 RS 控制台内扫描并连接 PCAN；无需另开真机终端命令。"
+fi
 
 cd "${REPO_DIR}/frontend/web-mujoco"
 npm run dev

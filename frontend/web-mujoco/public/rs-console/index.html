@@ -185,14 +185,36 @@
             <option value="simulation" data-i18n="ros.targetSimulation">RS 仿真（/rebotarm_rs）</option>
           </select>
         </label>
+        <div class="ros-feedback">
+          <span>CAN 设备</span>
+          <strong id="can-status">等待扫描</strong>
+        </div>
         <label class="field-row">
-          <span data-i18n="ros.ws">rebotd WebSocket</span>
-          <input id="ros-url" type="text" value="ws://127.0.0.1:8765" placeholder="ws://127.0.0.1:8765" spellcheck="false">
+          <span>PCAN / SocketCAN</span>
+          <select id="can-device">
+            <option value="">尚未扫描</option>
+          </select>
         </label>
         <div class="button-grid">
-          <button type="button" id="ros-connect" data-i18n="ros.connect">连接机械臂</button>
-          <button type="button" id="ros-disconnect" data-i18n="ros.disconnect">断开</button>
+          <button type="button" id="can-scan">扫描 CAN</button>
+          <button type="button" id="can-connect" disabled>连接机械臂</button>
+          <button type="button" id="can-disconnect" disabled>安全断开</button>
         </div>
+        <label class="switch-row">
+          <input type="checkbox" id="can-safety-confirm">
+          <span>我已清空工作区、卸下负载，并确保急停可触达</span>
+        </label>
+        <details class="llm-setup-guide">
+          <summary>本地控制服务（高级）</summary>
+          <label class="field-row">
+            <span data-i18n="ros.ws">rebotd WebSocket</span>
+            <input id="ros-url" type="text" value="ws://127.0.0.1:8765" placeholder="ws://127.0.0.1:8765" spellcheck="false">
+          </label>
+          <div class="button-grid">
+            <button type="button" id="ros-connect">重连本地服务</button>
+            <button type="button" id="ros-disconnect">断开本地服务</button>
+          </div>
+        </details>
         <label class="switch-row">
           <input type="checkbox" id="ros-safe-disconnect">
           <span data-i18n="ros.safeDisconnect">断开时自动安全回零并失能</span>
