@@ -132,7 +132,8 @@
    teachHardwareRecord: document.getElementById('teach-hardware-record'),
    teachHardwareModeRow: document.getElementById('teach-hardware-mode-row'),
    teachHomeGripperRow: document.getElementById('teach-home-gripper-row'),
-   teachHomeGripperMode: document.getElementById('teach-home-gripper-mode')
+   teachHomeGripperMode: document.getElementById('teach-home-gripper-mode'),
+   teachReplay: document.getElementById('teach-replay')
   };
 
  if (!window.ReBotRosClient || !els.connect) return;
@@ -196,6 +197,7 @@
  const MIRROR_HOLD_MS = 1800;
  let latestJointPositions = null;
  let rosBackend = 'unknown';
+ let latestArmStateMachine = 'DISCONNECTED';
  let hardwareConnected = false;
  let connectedCanChannel = '';
  let connectedDriver = 'disconnected';
@@ -1076,6 +1078,8 @@
     const mode = msg.mode || 'unknown';
     updateRosBackend(mode);
     const machine = msg.state_machine || 'unknown';
+    latestArmStateMachine = String(machine).toUpperCase();
+    updateTeachingReplayInterlock();
     const errors = Array.isArray(msg.error_codes) && msg.error_codes.length ? t('fb.errors', { codes: msg.error_codes.join(', ') }) : '';
     setMessage(`${enabled}，模式 ${mode}，状态 ${machine}${errors}`);
     updateGravityStatus(machine === 'GRAVITY_COMP', machine, 'arm');
@@ -1225,19 +1229,20 @@
     els.teachHardwareRecord.textContent = hardwareTeachActive
       ? t('sim.stopHardwareRecord')
       : (busyText || t('teach.hardwareRecord'));
+    updateTeachingReplayInterlock();
   }
 
  function forwardSimCommand(command) {
+   if (command && command.type === 'teaching-replay') {
+     forwardTeachingReplay(command);
+     return;
+   }
    if (hardwareTeachActive) {
      writeLog('真机推动示教中，已忽略网页控制指令', 'warn');
      return;
    }
    if (command && command.type === 'execute-current-pose') {
      void executeCurrentPoseCommand(command);
-     return;
-   }
-   if (command && command.type === 'teaching-replay') {
-     forwardTeachingReplay(command);
      return;
    }
    if (command && command.type === 'tcp-drag-start') {
@@ -1422,7 +1427,27 @@
       ? command.waypoints.filter((point) => point && point.joints)
       : [];
     const endpointOnly = command && command.mode === 'endpoint';
-    if ((!endpointOnly && waypoints.length < 2) || (endpointOnly && !waypoints.length) || !controlAllowed(false)) return;
+    if ((!endpointOnly && waypoints.length < 2) || (endpointOnly && !waypoints.length)) return;
+    hardwareBatchFeedbackActive = TARGET_KEY === 'hardware' && els.mirror.checked;
+    if (TARGET_KEY === 'hardware' && typeof command.claim === 'function') {
+      command.claim({ feedbackDriven: hardwareBatchFeedbackActive });
+    }
+    const blockedReason = teachingReplayBlockedReason();
+    if (blockedReason) {
+      rejectTeachingReplay(command, blockedReason);
+      return;
+    }
+    if (!controlAllowed(false)) {
+      if (TARGET_KEY === 'hardware') {
+        rejectTeachingReplay(command, '网页控制锁未开启，已取消真机示教回放');
+      } else {
+        hardwareBatchFeedbackActive = false;
+      }
+      return;
+    }
+    if (TARGET_KEY !== 'hardware' && typeof command.claim === 'function') {
+      command.claim({ feedbackDriven: hardwareBatchFeedbackActive });
+    }
     const finalJoints = waypoints[waypoints.length - 1].joints;
     if (TARGET_KEY === 'hardware') {
       Object.entries(finalJoints).forEach(([name, value]) => {
@@ -1434,14 +1459,40 @@
     setHardwareTargetGhost(finalJoints);
     if (hardwareBatchFinishTimer) window.clearTimeout(hardwareBatchFinishTimer);
     hardwareBatchFinishTimer = 0;
-    hardwareBatchFeedbackActive = TARGET_KEY === 'hardware' && els.mirror.checked;
     if (!hardwareBatchFeedbackActive) resetFeedbackRenderer();
-    if (typeof command.claim === 'function') {
-      command.claim({
-        feedbackDriven: hardwareBatchFeedbackActive
-      });
-    }
     void runTeachingReplayOnRos(command, waypoints);
+  }
+
+  function teachingReplayBlockedReason() {
+    if (TARGET_KEY !== 'hardware') return '';
+    if (hardwareTeachActive) return '真机推动示教仍在进行，请先结束示教';
+    if (hardwareTeachBusy || latestArmStateMachine === 'SAFE_HOMING') {
+      return '机械臂正在安全回零，完成后才能回放';
+    }
+    if (latestArmStateMachine === 'GRAVITY_COMP') {
+      return '机械臂仍处于重力补偿，请先结束推动示教';
+    }
+    if (latestArmStateMachine === 'TRAJ_RUNNING') {
+      return '已有轨迹正在执行，请等待完成';
+    }
+    return '';
+  }
+
+  function rejectTeachingReplay(command, message) {
+    hardwareBatchFeedbackActive = false;
+    resetFeedbackRenderer();
+    setMessage(message);
+    writeLog(message, 'warn');
+    Promise.resolve().then(() => {
+      if (typeof command.complete === 'function') command.complete(false, message);
+    });
+  }
+
+  function updateTeachingReplayInterlock() {
+    if (!els.teachReplay || TARGET_KEY !== 'hardware') return;
+    const reason = teachingReplayBlockedReason();
+    els.teachReplay.disabled = Boolean(reason);
+    els.teachReplay.title = reason;
   }
 
   function setHardwareTargetGhost(joints) {
@@ -2405,6 +2456,7 @@
 
   function formatServiceResult(result) {
     if (!result) return t('log.rosCallDone');
+    if (result.completed === true) return t('msg.trajectoryComplete');
     if (typeof result.accepted === 'boolean') return result.accepted ? t('msg.goalAccepted') : t('msg.goalRejected');
     if (typeof result.message === 'string' && result.message) return result.message;
     if (typeof result.reached_position === 'number') return t('msg.gripperReached', { mm: Math.round(result.reached_position * 1000) });

@@ -194,6 +194,8 @@ class FakeRSDriver:
         self._require_enabled()
         if self._gravity:
             raise RuntimeError("stop gravity compensation before trajectory")
+        if self._state in {"SAFE_HOMING", "TRAJ_RUNNING"}:
+            raise RuntimeError(f"rejecting trajectory stream in state {self._state}")
         self._state = "TRAJ_RUNNING"
 
     def update_trajectory_reference(self, positions, velocities) -> None:

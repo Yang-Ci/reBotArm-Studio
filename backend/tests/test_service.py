@@ -74,6 +74,23 @@ class RobotServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(result["duration"], 0.04)
         self.assertEqual(self.driver.state_machine, "IDLE")
 
+    async def test_trajectory_is_rejected_during_safe_home(self) -> None:
+        self.driver.set_state_machine("SAFE_HOMING")
+
+        with self.assertRaisesRegex(RuntimeError, "SAFE_HOMING"):
+            await self.service.dispatch(
+                "trajectory.execute",
+                {
+                    "teaching": True,
+                    "points": [
+                        {"time": 0.0, "positions": [0, 0, 0, 0, 0, 0]},
+                        {"time": 0.1, "positions": [0.01, 0, 0, 0, 0, 0]},
+                    ],
+                },
+            )
+
+        self.assertEqual(self.driver.state_machine, "SAFE_HOMING")
+
     async def test_disable_safe_homes_before_cutting_enable(self) -> None:
         await self.service.dispatch(
             "joint.set_target", {"name": "joint1", "position": 0.3}

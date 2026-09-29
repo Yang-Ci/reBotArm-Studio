@@ -302,6 +302,7 @@
     'msg.disconnectGuardFail': { zh: '断开防护失败，ROS 保持连接：{err}', en: 'Disconnect guard failed; ROS stays connected: {err}' },
     'msg.goalAccepted': { zh: '动作目标已接受', en: 'Goal accepted' },
     'msg.goalRejected': { zh: '动作目标被拒绝', en: 'Goal rejected' },
+    'msg.trajectoryComplete': { zh: '轨迹执行完成', en: 'Trajectory completed' },
     'msg.gripperReached': { zh: '夹爪到达 {mm} 毫米', en: 'Gripper reached {mm} mm' },
     'msg.visionMoveAbort': { zh: '视觉移动流程中止', en: 'Vision move flow aborted' },
     'msg.visionPickAbort': { zh: '视觉抓取流程中止', en: 'Vision pick flow aborted' },

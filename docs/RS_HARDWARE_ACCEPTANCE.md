@@ -24,6 +24,8 @@ velocity and without payload.
 - Test gripper open, close, hold, manual release and low-resistance assist with no object.
 - Run safe-home from a near-zero pose and confirm disable only occurs after settling.
 - Run one short multi-joint trajectory, cancel mid-path, and verify hold behavior.
+- Finish a pushing-teach recording and confirm Replay stays disabled during safe-home, then
+  becomes available in `IDLE`; the first replay must move the hardware and web twin together.
 - Test TCP IK and Cartesian trajectory in the centre of the reachable workspace.
 - Test gravity compensation start/stop while ready to use the emergency stop.
 - Disconnect the browser and verify the daemon watchdog holds the current pose.
