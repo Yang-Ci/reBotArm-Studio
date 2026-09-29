@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Callable
 
 
 CAN_CHANNEL_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]+$")
+PERMISSION_ERRORS = ("operation not permitted", "permission denied", "not permitted")
 
 
 def scan_socketcan(
@@ -55,17 +58,25 @@ def configure_socketcan(
     *,
     bitrate: int = 1_000_000,
     run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+    ip_command: str | None = None,
+    privilege_helper: str | None = None,
 ) -> None:
-    """Configure one pre-existing SocketCAN interface after user confirmation."""
+    """Configure SocketCAN, using graphical Polkit authorization if required."""
     if not CAN_CHANNEL_PATTERN.fullmatch(channel):
         raise ValueError(f"invalid CAN interface name: {channel!r}")
     if bitrate <= 0:
         raise ValueError("CAN bitrate must be positive")
 
+    ip_path = ip_command or shutil.which("ip") or "ip"
+    pkexec_path = (
+        privilege_helper
+        if privilege_helper is not None
+        else shutil.which("pkexec")
+    )
     commands = (
-        ["ip", "link", "set", "dev", channel, "down"],
+        [ip_path, "link", "set", "dev", channel, "down"],
         [
-            "ip",
+            ip_path,
             "link",
             "set",
             "dev",
@@ -77,24 +88,57 @@ def configure_socketcan(
             "restart-ms",
             "100",
         ],
-        ["ip", "link", "set", "dev", channel, "up"],
+        [ip_path, "link", "set", "dev", channel, "up"],
     )
     for command in commands:
-        try:
-            result = run(
-                command,
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=3.0,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            raise RuntimeError(f"failed to configure {channel}: {exc}") from exc
-        if result.returncode != 0:
-            detail = (result.stderr or result.stdout or "ip command failed").strip()
-            if "not permitted" in detail.lower() or "permission denied" in detail.lower():
-                detail = "the installed rebotd service lacks CAN network permission"
-            raise RuntimeError(f"failed to configure {channel}: {detail}")
+        result = _run_command(run, command, timeout=3.0)
+        if result.returncode == 0:
+            continue
+
+        detail = (result.stderr or result.stdout or "ip command failed").strip()
+        permission_denied = any(marker in detail.lower() for marker in PERMISSION_ERRORS)
+        if permission_denied and pkexec_path:
+            elevated = [
+                pkexec_path,
+                sys.executable,
+                "-m",
+                "rebotd.can_helper",
+                channel,
+                str(bitrate),
+            ]
+            result = _run_command(run, elevated, timeout=90.0)
+            if result.returncode == 0:
+                return
+            detail = (
+                result.stderr
+                or result.stdout
+                or "system authorization was cancelled or denied"
+            ).strip()
+        elif permission_denied:
+            detail = "graphical system authorization is unavailable (pkexec not found)"
+        raise RuntimeError(f"failed to configure {channel}: {detail}")
+
+
+def _run_command(
+    run: Callable[..., subprocess.CompletedProcess[str]],
+    command: list[str],
+    *,
+    timeout: float,
+) -> subprocess.CompletedProcess[str]:
+    try:
+        return run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            "system authorization timed out; approve the App permission dialog and retry"
+        ) from exc
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(f"could not execute {' '.join(command)}: {exc}") from exc
 
 
 def _ip_details(

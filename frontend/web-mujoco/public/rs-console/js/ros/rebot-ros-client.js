@@ -101,7 +101,7 @@
         channel,
         productId: productId || 'b601-rs',
         confirm: 'I_UNDERSTAND_REBOTARM_WILL_MOVE'
-      }, 30000).then(async (result) => {
+      }, 120000).then(async (result) => {
         this._hello = await this._rpc('system.hello', {}, 5000);
         this._emitHardwareState(this._hello);
         return result;

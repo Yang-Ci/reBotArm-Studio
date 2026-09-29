@@ -1985,7 +1985,13 @@
       setMessage(`${channel} 已连接；请确认状态反馈后再解锁网页控制`);
       writeLog(`${channel} 真机连接成功`, 'ok');
     } catch (error) {
-      const message = `机械臂连接失败：${error && error.message ? error.message : error}`;
+      const detail = error && error.message ? error.message : String(error);
+      let message = `机械臂连接失败：${detail}`;
+      if (/authorization.*(cancelled|denied|timed out)|request dismissed/i.test(detail)) {
+        message = '机械臂连接失败：系统授权未完成，请批准权限弹窗后重试';
+      } else if (/graphical system authorization is unavailable/i.test(detail)) {
+        message = '机械臂连接失败：系统缺少图形授权组件 pkexec';
+      }
       updateHardwareConnectionUi({ connected: false });
       setMessage(message);
       writeLog(message, 'error');

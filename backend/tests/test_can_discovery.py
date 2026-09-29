@@ -77,7 +77,12 @@ class CanDiscoveryTests(unittest.TestCase):
             commands.append(command)
             return CompletedProcess(command, 0, "", "")
 
-        configure_socketcan("can0", run=fake_run)
+        configure_socketcan(
+            "can0",
+            run=fake_run,
+            ip_command="ip",
+            privilege_helper="pkexec",
+        )
 
         self.assertEqual(commands[0], ["ip", "link", "set", "dev", "can0", "down"])
         self.assertIn("1000000", commands[1])
@@ -86,3 +91,29 @@ class CanDiscoveryTests(unittest.TestCase):
     def test_rejects_invalid_interface_name(self) -> None:
         with self.assertRaisesRegex(ValueError, "invalid CAN interface"):
             configure_socketcan("can0; reboot")
+
+    def test_uses_graphical_authorization_when_permission_is_denied(self) -> None:
+        commands = []
+
+        def fake_run(command, **_kwargs):
+            commands.append(command)
+            if command[0] == "ip":
+                return CompletedProcess(
+                    command,
+                    2,
+                    "",
+                    "RTNETLINK answers: Operation not permitted",
+                )
+            return CompletedProcess(command, 0, "", "")
+
+        configure_socketcan(
+            "can0",
+            run=fake_run,
+            ip_command="ip",
+            privilege_helper="pkexec",
+        )
+
+        self.assertEqual(len(commands), 2)
+        self.assertEqual(commands[1][0], "pkexec")
+        self.assertEqual(commands[1][2:4], ["-m", "rebotd.can_helper"])
+        self.assertEqual(commands[1][-2:], ["can0", "1000000"])
